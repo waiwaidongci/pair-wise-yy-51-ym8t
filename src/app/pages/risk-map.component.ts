@@ -9,7 +9,7 @@ import { MatCheckboxModule } from '@angular/material/checkbox'
 import { MatDividerModule } from '@angular/material/divider'
 import maplibregl, { LngLatBounds, Map as MapLibreMap } from 'maplibre-gl'
 import { length, lineString } from '@turf/turf'
-import type { RoutePackage, RiskSegment } from '../types'
+import type { RiskLevel, RoutePackage, RiskSegment } from '../types'
 import { RouteState } from '../store/route.reducer'
 import * as RouteActions from '../store/route.actions'
 
@@ -36,12 +36,25 @@ import * as RouteActions from '../store/route.actions'
           <mat-divider />
           <h3>路径测算</h3><p>实测里程：{{routeLength}} km</p><p>预计运行：{{estimatedTime}}</p><p>限制区段：{{restrictedCount}} 处</p>
           <button mat-flat-button color="primary" style="width:100%" (click)="requireAlternative()">要求补充绕行方案</button>
+          <mat-divider />
+          <h3>调整区段风险等级</h3>
+          <p>选中区段：<b>{{selectedSegmentId || '未选择'}}</b>
+            @if (activeSnapshot?.status === '会签中') { <span class="risk-mid">· 修改将使第 {{activeSnapshot?.revision}} 版快照的未完成会签失效</span> }
+            @if (activeSnapshot?.status === '已锁定') { <span class="risk-high">· 基线已锁定，风险等级只读</span> }
+          </p>
+          @if (conflict) { <p class="risk-high conflict-line">⚠ {{conflict}}</p> }
+          <div class="level-actions">
+            <button mat-stroked-button [disabled]="!selectedSegmentId || locked" (click)="setLevel('高')">高</button>
+            <button mat-stroked-button [disabled]="!selectedSegmentId || locked" (click)="setLevel('中')">中</button>
+            <button mat-stroked-button [disabled]="!selectedSegmentId || locked" (click)="setLevel('低')">低</button>
+          </div>
         </aside>
       </div>
     </main>
   `,
   styles: [`
     h2,h3{margin:0 0 10px}.panel-head{display:flex;justify-content:space-between}.segment{width:100%;display:flex;justify-content:space-between;text-align:left;gap:10px;padding:13px;margin:6px 0;border:1px solid #e1e7ef;background:#fff;border-radius:6px;color:inherit;cursor:pointer}.segment.active{border-color:#2563eb;background:#f5f8ff}.segment b,.segment small,.segment em{display:block}.segment small{color:#7a8798;margin:4px 0}.segment em{font-size:12px;color:#475569;font-style:normal}
+    .level-actions{display:flex;gap:10px}.level-actions button{flex:1}.conflict-line{font-size:12px;margin:6px 0}
   `],
 })
 export class RiskMapComponent implements AfterViewInit, OnDestroy {
@@ -51,14 +64,18 @@ export class RiskMapComponent implements AfterViewInit, OnDestroy {
   private map?: MapLibreMap
   selectedRouteId = ''
   selectedSegmentId = ''
+  conflict = ''
+  snapshots: RouteState['snapshots'] = []
   layers = { tunnel: true, bridge: true, water: true, population: true }
 
   get selectedRoute(): RoutePackage | undefined { let route: RoutePackage | undefined; this.state$.subscribe((state) => { route = state.routes.find((item: RoutePackage) => item.id === state.selectedRouteId) }).unsubscribe(); return route }
   get routeLength() { return this.selectedRoute ? length(lineString(this.selectedRoute.segments.flatMap((segment) => segment.coordinates)), { units: 'kilometers' }).toFixed(1) : '0.0' }
   get estimatedTime() { return `${Math.round(Number(this.routeLength) / 55 * 60 + this.restrictedCount * 8)} 分钟` }
   get restrictedCount() { return this.selectedRoute?.segments.filter((segment) => segment.status === '需绕行').length ?? 0 }
+  get activeSnapshot(): RouteState['snapshots'][number] | undefined { return this.snapshots.filter((snapshot) => snapshot.routeId === this.selectedRouteId).sort((a, b) => b.revision - a.revision)[0] }
+  get locked() { return this.activeSnapshot?.status === '已锁定' }
 
-  constructor() { this.state$.subscribe((state) => { this.selectedRouteId = state.selectedRouteId; this.selectedSegmentId = state.selectedSegmentId; if (this.map) this.drawRoute() }) }
+  constructor() { this.state$.subscribe((state) => { this.selectedRouteId = state.selectedRouteId; this.selectedSegmentId = state.selectedSegmentId; this.conflict = state.lastConflict; this.snapshots = state.snapshots; if (this.map) this.drawRoute() }) }
   ngAfterViewInit() {
     this.map = new maplibregl.Map({
       container: this.mapEl.nativeElement,
@@ -71,6 +88,7 @@ export class RiskMapComponent implements AfterViewInit, OnDestroy {
   ngOnDestroy() { this.map?.remove() }
   selectRoute(id: string) { this.store.dispatch(RouteActions.selectRoute({ id })) }
   selectSegment(segment: RiskSegment) { this.store.dispatch(RouteActions.selectSegment({ id: segment.id })); this.map?.flyTo({ center: segment.coordinates[0], zoom: 8 }) }
+  setLevel(level: RiskLevel) { if (this.selectedSegmentId) this.store.dispatch(RouteActions.updateSegmentLevel({ id: this.selectedSegmentId, level })) }
   requireAlternative() { this.store.dispatch(RouteActions.createAlternative()) }
   fitRoute() { if (!this.map || !this.selectedRoute) return; const bounds = new LngLatBounds(); this.selectedRoute.segments.flatMap((segment) => segment.coordinates).forEach((point) => bounds.extend(point)); this.map.fitBounds(bounds, { padding: 50 }) }
   refreshLayers() { for (const [id, visible] of Object.entries(this.layers)) { if (this.map?.getLayer(id)) this.map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none') } }
