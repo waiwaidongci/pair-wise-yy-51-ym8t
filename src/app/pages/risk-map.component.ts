@@ -9,7 +9,7 @@ import { MatCheckboxModule } from '@angular/material/checkbox'
 import { MatDividerModule } from '@angular/material/divider'
 import maplibregl, { LngLatBounds, Map as MapLibreMap } from 'maplibre-gl'
 import { length, lineString } from '@turf/turf'
-import type { RoutePackage, RiskSegment } from '../types'
+import type { RiskLevel, RoutePackage, RiskSegment } from '../types'
 import { RouteState } from '../store/route.reducer'
 import * as RouteActions from '../store/route.actions'
 
@@ -29,9 +29,17 @@ import * as RouteActions from '../store/route.actions'
         <aside class="card">
           <div class="panel-head"><div><h2>区段风险清单</h2><p>已按风险等级排序</p></div><strong [class.risk-high]="selectedRoute !== undefined && selectedRoute.score >= 70">总风险 {{selectedRoute?.score}}</strong></div>
           @for (segment of selectedRoute?.segments || []; track segment.id) {
-            <button class="segment" [class.active]="segment.id === selectedSegmentId" (click)="selectSegment(segment)">
-              <span><b>{{segment.name}}</b><small>{{segment.from}} → {{segment.to}} · {{segment.km}} km · {{segment.speed}}</small><em>{{segment.risks.join(' / ')}}</em></span><strong [class.risk-high]="segment.level==='高'" [class.risk-mid]="segment.level==='中'" [class.risk-low]="segment.level==='低'">{{segment.level}}</strong>
-            </button>
+            <div class="segment" [class.active]="segment.id === selectedSegmentId" (click)="selectSegment(segment)">
+              <span><b>{{segment.name}}</b><small>{{segment.from}} → {{segment.to}} · {{segment.km}} km · {{segment.speed}}</small><em>{{segment.risks.join(' / ')}}</em></span>
+              <span class="segment-right">
+                <strong [class.risk-high]="segment.level==='高'" [class.risk-mid]="segment.level==='中'" [class.risk-low]="segment.level==='低'">{{segment.level}}</strong>
+                <mat-select class="level-select" [ngModel]="segment.level" (ngModelChange)="changeLevel(segment, $event)" (click)="$event.stopPropagation()">
+                  <mat-option value="高">高</mat-option>
+                  <mat-option value="中">中</mat-option>
+                  <mat-option value="低">低</mat-option>
+                </mat-select>
+              </span>
+            </div>
           }
           <mat-divider />
           <h3>路径测算</h3><p>实测里程：{{routeLength}} km</p><p>预计运行：{{estimatedTime}}</p><p>限制区段：{{restrictedCount}} 处</p>
@@ -41,7 +49,7 @@ import * as RouteActions from '../store/route.actions'
     </main>
   `,
   styles: [`
-    h2,h3{margin:0 0 10px}.panel-head{display:flex;justify-content:space-between}.segment{width:100%;display:flex;justify-content:space-between;text-align:left;gap:10px;padding:13px;margin:6px 0;border:1px solid #e1e7ef;background:#fff;border-radius:6px;color:inherit;cursor:pointer}.segment.active{border-color:#2563eb;background:#f5f8ff}.segment b,.segment small,.segment em{display:block}.segment small{color:#7a8798;margin:4px 0}.segment em{font-size:12px;color:#475569;font-style:normal}
+    h2,h3{margin:0 0 10px}.panel-head{display:flex;justify-content:space-between}.segment{width:100%;display:flex;justify-content:space-between;align-items:center;text-align:left;gap:10px;padding:13px;margin:6px 0;border:1px solid #e1e7ef;background:#fff;border-radius:6px;color:inherit;cursor:pointer}.segment.active{border-color:#2563eb;background:#f5f8ff}.segment b,.segment small,.segment em{display:block}.segment small{color:#7a8798;margin:4px 0}.segment em{font-size:12px;color:#475569;font-style:normal}.segment-right{display:flex;align-items:center;gap:8px;flex-shrink:0}.level-select{width:72px}.level-select ::ng-deep .mat-mdc-form-field-subscript-wrapper{display:none}
   `],
 })
 export class RiskMapComponent implements AfterViewInit, OnDestroy {
@@ -71,6 +79,7 @@ export class RiskMapComponent implements AfterViewInit, OnDestroy {
   ngOnDestroy() { this.map?.remove() }
   selectRoute(id: string) { this.store.dispatch(RouteActions.selectRoute({ id })) }
   selectSegment(segment: RiskSegment) { this.store.dispatch(RouteActions.selectSegment({ id: segment.id })); this.map?.flyTo({ center: segment.coordinates[0], zoom: 8 }) }
+  changeLevel(segment: RiskSegment, level: RiskLevel) { this.store.dispatch(RouteActions.updateSegmentLevel({ id: segment.id, level })) }
   requireAlternative() { this.store.dispatch(RouteActions.createAlternative()) }
   fitRoute() { if (!this.map || !this.selectedRoute) return; const bounds = new LngLatBounds(); this.selectedRoute.segments.flatMap((segment) => segment.coordinates).forEach((point) => bounds.extend(point)); this.map.fitBounds(bounds, { padding: 50 }) }
   refreshLayers() { for (const [id, visible] of Object.entries(this.layers)) { if (this.map?.getLayer(id)) this.map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none') } }
